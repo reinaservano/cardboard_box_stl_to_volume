@@ -17,6 +17,14 @@ produce a finer grid and use more memory.
 python stl_to_volume.py .\box.stl --pitch 1 --output .\box_volume.npz
 ```
 
+STL files do not store their units. This converter assumes millimeters by
+default and prints both geometric and voxelized volume in liters. Specify a
+different coordinate unit when needed:
+
+```powershell
+python stl_to_volume.py .\box.stl --pitch 5 --stl-units mm
+```
+
 For an open scan such as a box with a missing wall or hole, use the explicit
 outer-envelope estimate:
 
@@ -33,7 +41,8 @@ The compressed NPZ contains:
 - `volume`: a `uint8` array with shape `(x, y, z)`; `1` means occupied.
 - `origin`: world-space coordinate of the grid origin.
 - `pitch`: voxel edge length.
-- `metadata`: JSON summary, including geometric and voxelized volume.
+- `metadata`: JSON summary, including geometric and voxelized volume in STL
+	units and liters.
 
 Read it with NumPy:
 

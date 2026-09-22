@@ -10,8 +10,21 @@ import numpy as np
 import trimesh
 
 
-def load_stl_mesh(input_path: Path, closure: str = "reject") -> trimesh.Trimesh:
-    """Load and validate an STL mesh, optionally closing it with a convex hull."""
+STL_UNIT_TO_LITERS = {
+    "mm": 1e-6,
+    "cm": 1e-3,
+    "m": 1e3,
+}
+
+
+def convert_stl(
+    input_path: Path,
+    output_path: Path,
+    pitch: float,
+    closure: str = "reject",
+    stl_units: str = "mm",
+) -> dict[str, object]:
+    """Voxelize an STL and write an NPZ volume with spatial metadata."""
     mesh = trimesh.load_mesh(input_path, file_type="stl")
     if isinstance(mesh, trimesh.Scene):
         mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
@@ -25,24 +38,8 @@ def load_stl_mesh(input_path: Path, closure: str = "reject") -> trimesh.Trimesh:
             mesh = mesh.convex_hull
         else:
             raise ValueError(
-                "The STL is not watertight. Choose convex-hull for an outer-envelope estimate."
+                "The STL is not watertight. Use --closure convex-hull for an outer-envelope estimate."
             )
-    return mesh
-
-
-def calculate_volume(input_path: Path, closure: str = "reject") -> float:
-    """Return the mesh volume in cubic units used by the STL."""
-    return float(abs(load_stl_mesh(input_path, closure).volume))
-
-
-def convert_stl(
-    input_path: Path,
-    output_path: Path,
-    pitch: float,
-    closure: str = "reject",
-) -> dict[str, object]:
-    """Voxelize an STL and write an NPZ volume with spatial metadata."""
-    mesh = load_stl_mesh(input_path, closure)
 
     voxel_grid = mesh.voxelized(pitch).fill()
     volume = np.asarray(voxel_grid.matrix, dtype=np.uint8)
@@ -50,6 +47,7 @@ def convert_stl(
     geometric_volume = float(abs(mesh.volume))
     occupied_voxels = int(volume.sum())
     voxel_volume = occupied_voxels * pitch**3
+    liters_per_cubic_unit = STL_UNIT_TO_LITERS[stl_units]
 
     metadata = {
         "input": str(input_path),
@@ -60,7 +58,9 @@ def convert_stl(
         "occupied_voxels": occupied_voxels,
         "voxel_volume": voxel_volume,
         "geometric_volume": geometric_volume,
-        "units": "the same units used by the STL",
+        "voxel_volume_liters": voxel_volume * liters_per_cubic_unit,
+        "geometric_volume_liters": geometric_volume * liters_per_cubic_unit,
+        "stl_units": stl_units,
     }
     np.savez_compressed(
         output_path,
@@ -72,37 +72,11 @@ def convert_stl(
     return metadata
 
 
-def resolve_input_path(input_path: Path) -> Path:
-    """Resolve an STL file path, accepting arbitrary filenames and directory inputs."""
-    if input_path.is_file():
-        if input_path.suffix.lower() != ".stl":
-            raise ValueError(f"Input file is not an STL: {input_path}")
-        return input_path
-
-    if input_path.is_dir():
-        stl_files = sorted(
-            path for path in input_path.iterdir() if path.is_file() and path.suffix.lower() == ".stl"
-        )
-        if not stl_files:
-            raise FileNotFoundError(f"No .stl files found in directory: {input_path}")
-        if len(stl_files) > 1:
-            raise ValueError(
-                f"Multiple STL files found in {input_path}; please choose one explicitly."
-            )
-        return stl_files[0]
-
-    raise FileNotFoundError(f"Input file not found: {input_path}")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert a closed STL mesh into a filled 3D voxel volume (.npz)."
     )
-    parser.add_argument(
-        "input",
-        type=Path,
-        help="Input STL file or directory containing a single STL file",
-    )
+    parser.add_argument("input", type=Path, help="Input STL file")
     parser.add_argument(
         "-o",
         "--output",
@@ -121,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="reject",
         help="How to handle an open STL (default: reject; convex-hull estimates an outer envelope)",
     )
+    parser.add_argument(
+        "--stl-units",
+        choices=tuple(STL_UNIT_TO_LITERS),
+        default="mm",
+        help="Units used by the STL coordinates (default: mm)",
+    )
     return parser
 
 
@@ -129,18 +109,23 @@ def main() -> int:
     if args.pitch <= 0:
         raise SystemExit("--pitch must be greater than zero.")
 
-    try:
-        input_path = resolve_input_path(args.input)
-    except (FileNotFoundError, ValueError) as error:
-        raise SystemExit(str(error)) from error
+    if not args.input.is_file():
+        raise SystemExit(f"Input file not found: {args.input}")
 
-    output_path = args.output or input_path.with_suffix(".npz")
+    output_path = args.output or args.input.with_suffix(".npz")
     try:
-        metadata = convert_stl(input_path, output_path, args.pitch, args.closure)
+        metadata = convert_stl(args.input, output_path, args.pitch, args.closure, args.stl_units)
     except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
 
-    print(f"{metadata['geometric_volume']:.12g}")
+    print(f"Wrote: {output_path}")
+    print(f"Closure: {metadata['closure']}")
+    print(f"Grid: {metadata['shape'][0]} x {metadata['shape'][1]} x {metadata['shape'][2]}")
+    print(f"Occupied voxels: {metadata['occupied_voxels']}")
+    print(f"Voxel volume: {metadata['voxel_volume']:.6g} cubic STL units")
+    print(f"Geometric volume: {metadata['geometric_volume']:.6g} cubic STL units")
+    print(f"Voxelized volume: {metadata['voxel_volume_liters']:.6g} liters")
+    print(f"Geometric volume: {metadata['geometric_volume_liters']:.6g} liters")
     return 0
 
 
