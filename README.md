@@ -45,19 +45,6 @@ volume = data["volume"]
 print(volume.shape, data["pitch"])
 ```
 
-## GUI volume calculator
-
-Launch the desktop GUI to upload an STL and calculate its volume in liters:
-
-```powershell
-python volume_gui.py
-```
-
-Choose the units used by the STL before reading the result. STL files do not
-store dependable unit metadata, so the default is millimeters. Watertight
-meshes are measured directly; for an open scan, enable the convex-hull option
-to calculate an outer-envelope estimate.
-
 By default, the STL must be watertight so the inside can be filled
 unambiguously. The `convex-hull` mode is available when an open scan must still
 produce a closed approximation.

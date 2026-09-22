@@ -72,11 +72,37 @@ def convert_stl(
     return metadata
 
 
+def resolve_input_path(input_path: Path) -> Path:
+    """Resolve an STL file path, accepting arbitrary filenames and directory inputs."""
+    if input_path.is_file():
+        if input_path.suffix.lower() != ".stl":
+            raise ValueError(f"Input file is not an STL: {input_path}")
+        return input_path
+
+    if input_path.is_dir():
+        stl_files = sorted(
+            path for path in input_path.iterdir() if path.is_file() and path.suffix.lower() == ".stl"
+        )
+        if not stl_files:
+            raise FileNotFoundError(f"No .stl files found in directory: {input_path}")
+        if len(stl_files) > 1:
+            raise ValueError(
+                f"Multiple STL files found in {input_path}; please choose one explicitly."
+            )
+        return stl_files[0]
+
+    raise FileNotFoundError(f"Input file not found: {input_path}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Convert a closed STL mesh into a filled 3D voxel volume (.npz)."
     )
-    parser.add_argument("input", type=Path, help="Input STL file")
+    parser.add_argument(
+        "input",
+        type=Path,
+        help="Input STL file or directory containing a single STL file",
+    )
     parser.add_argument(
         "-o",
         "--output",
@@ -102,21 +128,19 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.pitch <= 0:
         raise SystemExit("--pitch must be greater than zero.")
-    if not args.input.is_file():
-        raise SystemExit(f"Input file not found: {args.input}")
 
-    output_path = args.output or args.input.with_suffix(".npz")
     try:
-        metadata = convert_stl(args.input, output_path, args.pitch, args.closure)
+        input_path = resolve_input_path(args.input)
+    except (FileNotFoundError, ValueError) as error:
+        raise SystemExit(str(error)) from error
+
+    output_path = args.output or input_path.with_suffix(".npz")
+    try:
+        metadata = convert_stl(input_path, output_path, args.pitch, args.closure)
     except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
 
-    print(f"Wrote: {output_path}")
-    print(f"Closure: {metadata['closure']}")
-    print(f"Grid: {metadata['shape'][0]} x {metadata['shape'][1]} x {metadata['shape'][2]}")
-    print(f"Occupied voxels: {metadata['occupied_voxels']}")
-    print(f"Voxel volume: {metadata['voxel_volume']:.6g} cubic STL units")
-    print(f"Geometric volume: {metadata['geometric_volume']:.6g} cubic STL units")
+    print(f"{metadata['geometric_volume']:.12g}")
     return 0
 
 
