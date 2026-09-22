@@ -10,13 +10,8 @@ import numpy as np
 import trimesh
 
 
-def convert_stl(
-    input_path: Path,
-    output_path: Path,
-    pitch: float,
-    closure: str = "reject",
-) -> dict[str, object]:
-    """Voxelize an STL and write an NPZ volume with spatial metadata."""
+def load_stl_mesh(input_path: Path, closure: str = "reject") -> trimesh.Trimesh:
+    """Load and validate an STL mesh, optionally closing it with a convex hull."""
     mesh = trimesh.load_mesh(input_path, file_type="stl")
     if isinstance(mesh, trimesh.Scene):
         mesh = trimesh.util.concatenate(tuple(mesh.geometry.values()))
@@ -30,8 +25,24 @@ def convert_stl(
             mesh = mesh.convex_hull
         else:
             raise ValueError(
-                "The STL is not watertight. Use --closure convex-hull for an outer-envelope estimate."
+                "The STL is not watertight. Choose convex-hull for an outer-envelope estimate."
             )
+    return mesh
+
+
+def calculate_volume(input_path: Path, closure: str = "reject") -> float:
+    """Return the mesh volume in cubic units used by the STL."""
+    return float(abs(load_stl_mesh(input_path, closure).volume))
+
+
+def convert_stl(
+    input_path: Path,
+    output_path: Path,
+    pitch: float,
+    closure: str = "reject",
+) -> dict[str, object]:
+    """Voxelize an STL and write an NPZ volume with spatial metadata."""
+    mesh = load_stl_mesh(input_path, closure)
 
     voxel_grid = mesh.voxelized(pitch).fill()
     volume = np.asarray(voxel_grid.matrix, dtype=np.uint8)
